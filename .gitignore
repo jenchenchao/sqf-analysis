@@ -1,0 +1,7 @@
+# Large data files
+data/
+
+# R environment
+.Rproj.user/
+.Rhistory
+.RData
