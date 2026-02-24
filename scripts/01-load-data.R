@@ -1,20 +1,28 @@
+# 01-load-data.R
+# Load raw SQF data for all years (2006-2012) and save combined file.
+
 library(tidyverse)
 
-# Load all years of SQF data using relative paths
-years <- 2006:2012
+# Source custom loading functions
+source("R/data_loading.R")
 
-sqf_all <- map_dfr(years, function(year) {
-  file_path <- file.path("data", "raw", paste0(year, ".csv"))
+# Load all years of SQF data
+sqf_raw <- load_sqf_all(years = 2006:2012, data_dir = "data/raw")
 
-  cat("Loading", file_path, "...\n")
+# Print summary statistics
+message("\n=== Data Summary ===")
+message(sprintf("Total rows: %s", format(nrow(sqf_raw), big.mark = ",")))
+message(sprintf("Total columns: %d", ncol(sqf_raw)))
 
-  df <- read_csv(file_path, col_types = cols(.default = col_character()))
-  df$year <- year
-  df
-})
+# Rows per year
+year_summary <- sqf_raw %>%
+  group_by(data_year) %>%
+  summarise(n_stops = n(), .groups = "drop") %>%
+  arrange(data_year)
 
-# Print summary statistics for each year
-sqf_all %>%
-  group_by(year) %>%
-  summarise(n_stops = n()) %>%
-  print()
+print(year_summary)
+
+# Save combined raw data
+output_path <- "data/sqf_raw.rds"
+write_rds(sqf_raw, output_path, compress = "gz")
+message(sprintf("\nData saved to: %s", output_path))
