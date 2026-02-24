@@ -1,6 +1,9 @@
 # Large data files
 data/
 
+# Reference materials (local only)
+reference/
+
 # R environment
 .Rproj.user/
 .Rhistory
