@@ -9,6 +9,7 @@ library(tidyverse)
 library(glmnet)
 library(modelr)
 library(ranger)
+library(xgboost)
 
 source("R/ml_functions.R")
 
@@ -340,6 +341,33 @@ cat(sprintf("CV log-loss: %.4f (SD: %.4f)\n", rf_ll, sd(rf_cv_ll)))
 all_results[["Random forest"]] <- rf_ll
 
 
+# --- Spec 5: XGBoost ---
+# Gradient boosted trees — tested in 05c-try-xgboost.R, now integrated here.
+cat("\n--- Spec 5: XGBoost ---\n")
+dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+
+set.seed(42)
+xgb_cv <- xgb.cv(
+  data = dtrain,
+  params = list(
+    objective = "binary:logistic", eval_metric = "logloss",
+    eta = 0.1, max_depth = 6, subsample = 0.8, colsample_bytree = 0.8
+  ),
+  nrounds = 500, nfold = 5,
+  early_stopping_rounds = 20,
+  verbose = 0
+)
+
+xgb_log <- as_tibble(xgb_cv$evaluation_log)
+xgb_best_round <- which.min(xgb_log$test_logloss_mean)
+xgb_ll <- xgb_log$test_logloss_mean[xgb_best_round]
+cat(sprintf("CV log-loss: %.4f (best round: %d)\n", xgb_ll, xgb_best_round))
+all_results[["XGBoost"]] <- xgb_ll
+
+# Also report nnet result from 05d-try-nnet.R for the comparison table
+# (nnet CV log-loss was 0.2012 — worse than logistic regression, not competitive)
+
+
 # --- Final comparison ---
 cat("\n========================================\n")
 cat("   MODEL COMPARISON (CV Log-Loss)\n")
@@ -375,21 +403,26 @@ ggsave("output/model_comparison.png", p_compare, width = 8, height = 4, bg = "wh
 
 cat("\n=== Generating Holdout Predictions ===\n")
 
-# Refit random forest on full training data
-cat("Fitting random forest on full training data...\n")
-train_rf <- train_imputed %>%
-  mutate(arrest_f = factor(arrest, levels = c(FALSE, TRUE)))
-
-rf_final <- ranger(
-  arrest_f ~ . - id - arrest,
-  data = train_rf, num.trees = 500, probability = TRUE,
-  min.node.size = 20, mtry = 6, seed = 42
+# Use XGBoost (best model) for final predictions
+cat("Fitting XGBoost on full training data...\n")
+xgb_final <- xgb.train(
+  data = dtrain,
+  params = list(
+    objective = "binary:logistic", eval_metric = "logloss",
+    eta = 0.1, max_depth = 6, subsample = 0.8, colsample_bytree = 0.8
+  ),
+  nrounds = xgb_best_round, verbose = 0
 )
 
-holdout_imp <- impute_data(holdout) %>%
-  mutate(arrest_f = factor(FALSE, levels = c(FALSE, TRUE)))
+holdout_feat <- prepare_matrix(holdout)
+X_holdout <- holdout_feat$X
+holdout_kept <- holdout_feat$kept_rows
 
-holdout_preds <- predict(rf_final, data = holdout_imp)$predictions[, "TRUE"]
+preds_kept <- predict(xgb_final, xgb.DMatrix(data = X_holdout))
+
+# Fill any dropped rows with base rate
+holdout_preds <- rep(as.numeric(baseline["base_rate"]), nrow(holdout))
+holdout_preds[holdout_kept] <- preds_kept
 
 submission <- tibble(
   id = holdout$id,
